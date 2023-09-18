@@ -1,0 +1,665 @@
+---
+title: "Informe Final"
+author: "Oscar"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("tidyverse")
+```
+
+## CARGA Y LIMPIEZA DE DATOS
+
+Se realiza la carga de los conjuntos de datos necesarios para el análisis así como su unión en un mismo Data Frame. Se llevan a cabo los siguientes pasos:
+*Carga de las bases de datos por cada liga, correspondientes a la última temporada.
+*Unión de estos Data Frame en uno solo.
+*Separar la columna Posición en varias columnas y eliminar a partir de la tercera, puesto que no interesa.
+*Crear nuevas variables para datos por 90 minutos.
+
+```{r, include = FALSE, warning = FALSE}
+setwd("C:/Users/ADMIN/Documents/GitHub/scraping-understat-dataset/datasets")
+library(readr)
+players_bundesliga_22_23 <- read_csv("bundesliga/players_bundesliga_22-23.csv")
+players_bundesliga_21_22 <- read_csv("bundesliga/players_bundesliga_21-22.csv")
+players_bundesliga_20_21 <- read_csv("bundesliga/players_bundesliga_20-21.csv")
+players_epl_22_23 <- read_csv("epl/players_epl_22-23.csv")
+players_epl_21_22 <- read_csv("epl/players_epl_21-22.csv")
+players_epl_20_21 <- read_csv("epl/players_epl_20-21.csv")
+players_la_liga_22_23 <- read_csv("la_liga/players_la_liga_22-23.csv")
+players_la_liga_21_22 <- read_csv("la_liga/players_la_liga_21-22.csv")
+players_la_liga_20_21 <- read_csv("la_liga/players_la_liga_20-21.csv")
+players_ligue_1_22_23 <- read_csv("ligue_1/players_ligue_1_22-23.csv")
+players_ligue_1_21_22 <- read_csv("ligue_1/players_ligue_1_21-22.csv")
+players_ligue_1_20_21 <- read_csv("ligue_1/players_ligue_1_20-21.csv")
+players_serie_a_22_23 <- read_csv("serie_a/players_serie_a_22-23.csv")
+players_serie_a_21_22 <- read_csv("serie_a/players_serie_a_21-22.csv")
+players_serie_a_20_21 <- read_csv("serie_a/players_serie_a_20-21.csv")
+```
+
+```{r, warning = FALSE}
+df = rbind(players_bundesliga_22_23,players_epl_22_23,players_la_liga_22_23,players_ligue_1_22_23,players_serie_a_22_23)
+#View(df)
+summary(df)
+```
+
+
+```{r, warning =FALSE}
+library(dplyr)
+library(tidyr)
+library(stringr)
+
+df1 = df %>%
+  separate(position, c('position1', 'position2','position3')) %>%
+  cbind(goals90=df$goals/df$time*90) %>%
+  cbind(xG90=df$xG/df$time*90) %>%
+  cbind(assists90=df$assists/df$time*90) %>%
+  cbind(xA90=df$xA/df$time*90) %>%
+  cbind(shots90=df$shots/df$time*90) %>%
+  cbind(key_passes90=df$key_passes/df$time*90) %>%
+  cbind(npg90=df$npg/df$time*90) %>%
+  cbind(npxG90=df$npxG/df$time*90) %>%
+  cbind(xGChain90=df$xGChain/df$time*90) %>%
+  cbind(xGBuildup90=df$xGBuildup/df$time*90)
+```
+
+Respecto al Data Frame de los tiros realizados en estas ligas durante la temporada 2022-2023, se realizará la limpieza de datos para utilizarlo luego.
+
+Para la limpieza de los tiros, se eliminan las columnas erróneas que han debido crearse al realizar el web scrapping y los menos recientes, quedándonos con los tiros de la última temporada.
+
+```{r, warning =FALSE}
+shots_dataset <- read_csv("shots_dataset.csv")
+shots_dataset = shots_dataset[shots_dataset$h_a !='h_a', ]
+shots_dataset = shots_dataset[shots_dataset$season >=2022, ]
+```
+Con esto, ha finalizado la limpieza de los datos.
+
+## ANÁLISIS DE DATOS
+El objetivo de este estudio es proporcionar varios jugadores como posibles sustitutos de los jugadores del Atlético de Madrid, y se realizará por posición.
+Por tanto, se estudiarán las métricas de los jugadores titulares del equipo y se buscarán jugadores similares de otros equipos.
+
+
+El estudio se realizará por posiciones de juego. Vamos a ver cuántas posiciones hay y a qué equivalen esas siglas.
+
+```{r}
+ggplot(df1, aes(position1)) +
+  geom_bar() + 
+  labs(title="Posiciones posibles")
+```
+
+Se ve de forma clara a qué corresponde cada sigla:
+* D = Defender - Defensa
+* F = Forward - Atacante
+* GK = Goalkeeper - Portero
+* M = Midfielder - Centrocampista
+* s = Striker - Delantero
+
+
+### DELANTEROS
+Para la posición de delantero, lo principal es que marquen más goles de lo que "deben", es decir, que la diferencia entre goals - xG sea positiva. Además, que sean capaces de marcar más goles/90 min es interesante. Por tanto, se crearán gráficos donde observar esta variable y se aprovechará para crear nuevas variables para datos por 90 minutos.
+
+```{r}
+forward <- rbind(df1[df1$position1 == "F",], df1[df1$position2 == "F",], df1[df1$position1 == "S",])
+forward <- forward %>% filter(!is.na(forward$player_name))
+forward <- distinct(forward)
+```
+
+
+```{r, warning =FALSE}
+library("ggplot2")
+library('patchwork')
+library("ggrepel")
+
+forw <- forward %>%
+  filter(goals90 > 0.6 & xG90 >0.4 & time > 350)
+
+#Crea una nueva variable de diferencia entre goles anotados y esperados y ordena por orden decreciente.
+delantero <- forward %>%
+  cbind(dif_xG = forward$goals90 - forward$xG90)
+delantero <- delantero[order(delantero$dif_xG, decreasing = TRUE), ] 
+
+p1 <- ggplot(data = forward[forward$time > 350,], aes(x = xG90, y = goals90)) + 
+  geom_point(aes(colour = position1)) + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  labs(title ="Gráfico de dispersión goles y goles esperados", subtitle = "Se han filtrado los datos de los atacantes con más de 350 min durante la temporada")
+
+p2 <- ggplot(forw, aes(x = xG90, y = goals90,label =player_name )) + 
+  geom_point(aes(colour = position1)) + 
+  geom_text_repel(aes(label = player_name), size=2.3) + 
+  geom_smooth(method = "lm", se = FALSE) + 
+  labs(title ="Gráfico de dispersión goles y goles esperados", subtitle = "Se han filtrado los datos de los atacantes con más de 350 min además de modificarse los ejes")
+
+p1 / p2
+```
+
+Se representan las variables principales de un delantero en forma de función de densidad. El código será el mismo para todas los gráficos, solo se mostrará el primero. Gracias a la representación en rojo de los 4 delanteros del equipo, luego se filtrará la totalidad de jugadores con valores similares a estos.
+
+```{r}
+delantero %>%
+  filter(goals > 0 & time > 500) %>%
+  ggplot(aes(x = goals90)) + 
+  geom_density(fill="deepskyblue2", alpha=0.6) +
+  geom_vline(aes(xintercept = delantero[delantero$player_name == "Memphis Depay",21 ], color="red"), linetype="dashed") +
+    geom_vline(aes(xintercept = delantero[delantero$player_name == "Antoine Griezmann",21 ], color="red"), linetype="dashed") +
+    geom_vline(aes(xintercept = delantero[delantero$player_name == "Álvaro Morata",21 ], color="red"), linetype="dashed") +
+    geom_vline(aes(xintercept = delantero[delantero$player_name == "Ángel Correa",21 ], color="red"), linetype="dashed") + 
+  geom_vline(aes(xintercept = mean(goals90), color="red")) + 
+  geom_text(mapping=aes(x=mean(goals90), y = 0, label = "Media Delanteros"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) +
+     geom_text(mapping=aes(x=delantero[delantero$player_name == "Antoine Griezmann",21 ], y = 0, label = "Antoine Griezmann"), size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Ángel Correa",21 ], y = 0, label = "Ángel Correa"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Memphis Depay",21 ], y = 0, label = "Memphis Depay"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Álvaro Morata",21 ], y = 0, label = "Álvaro Morata"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+  labs(title="Curva de densidad de Goles por 90 Minutos")
+```
+
+
+```{r, echo=FALSE}
+ delantero %>%
+   filter(goals > 0 & time > 500) %>%
+   ggplot(aes(x = assists90)) + 
+   geom_density(fill="deepskyblue2", alpha=0.6) +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Memphis Depay",23 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Antoine Griezmann",23 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Álvaro Morata",23 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Ángel Correa",23 ], color="red"), 
+              linetype="dashed") + 
+  geom_vline(aes(xintercept = mean(assists90), color="red")) + 
+  geom_text(mapping=aes(x=mean(assists90), y = 0, label = "Media Delanteros"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) +
+   geom_text(mapping=aes(x=delantero[delantero$player_name == "Antoine Griezmann",23 ], y = 0, label = "Antoine Griezmann"), size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Ángel Correa",23 ], y = 0, label = "Ángel Correa"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Memphis Depay",23 ], y = 0, label = "Memphis Depay"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Álvaro Morata",23 ], y = 0, label = "Álvaro Morata"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+   labs(title="Curva de densidad de Asistencias por 90 Minutos")
+```
+
+ Creamos otras dos variables interesantes para el análisis y representación gráfica
+
+```{r}
+delantero <- delantero %>%
+  cbind(goals_x_shots = delantero$goals90 / delantero$shots90) %>%
+  cbind(goals_xG_x_shot = delantero$goals90 * delantero$xG90 / delantero$shots90)
+```
+
+```{r, echo=FALSE}
+delantero %>%
+   filter(goals > 0 & time > 500) %>%
+   ggplot(aes(x = goals_x_shots)) + 
+   geom_density(fill="deepskyblue2", alpha=0.6) +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Memphis Depay",32 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Antoine Griezmann",32 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Álvaro Morata",32 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Ángel Correa",32 ], color="red"), 
+              linetype="dashed") + 
+  geom_vline(aes(xintercept = mean(goals_x_shots), color="red")) + 
+  geom_text(mapping=aes(x=mean(goals_x_shots), y = 0, label = "Media Delanteros"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) +
+   geom_text(mapping=aes(x=delantero[delantero$player_name == "Antoine Griezmann",32 ], y = 0, label = "Antoine Griezmann"), size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Ángel Correa",32 ], y = 0, label = "Ángel Correa"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Memphis Depay",32 ], y = 0, label = "Memphis Depay"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Álvaro Morata",32 ], y = 0, label = "Álvaro Morata"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+   labs(title="Curva de densidad de Goles por cada tiro")
+```
+
+```{r, echo=FALSE}
+delantero %>%
+   filter(goals > 0 & time > 500) %>%
+   ggplot(aes(x = goals_xG_x_shot)) + 
+   geom_density(fill="deepskyblue2", alpha=0.6) +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Memphis Depay",33 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Antoine Griezmann",33 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Álvaro Morata",33 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Ángel Correa",33], color="red"), 
+              linetype="dashed") + 
+  geom_vline(aes(xintercept = mean(goals_xG_x_shot), color="red")) + 
+  geom_text(mapping=aes(x=mean(goals_xG_x_shot), y = 0, label = "Media Delanteros"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) +
+   geom_text(mapping=aes(x=delantero[delantero$player_name == "Antoine Griezmann",33 ], y = 0, label = "Antoine Griezmann"), size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Ángel Correa",33 ], y = 0, label = "Ángel Correa"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Memphis Depay",33 ], y = 0, label = "Memphis Depay"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Álvaro Morata",33 ], y = 0, label = "Álvaro Morata"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+   labs(title="Curva de densidad de la diferencia de goles y goles esperados por cada tiro")
+```
+
+
+```{r, echo=FALSE}
+delantero %>%
+   filter(goals > 0 & time > 500) %>%
+   ggplot(aes(x = key_passes90)) + 
+   geom_density(fill="deepskyblue2", alpha=0.6) +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Memphis Depay",26 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Antoine Griezmann",26 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Álvaro Morata",26 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Ángel Correa",26 ], color="red"), 
+              linetype="dashed") + 
+  geom_vline(aes(xintercept = mean(key_passes90), color="red")) + 
+  geom_text(mapping=aes(x=mean(key_passes90), y = 0, label = "Media Delanteros"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) +
+   geom_text(mapping=aes(x=delantero[delantero$player_name == "Antoine Griezmann",26 ], y = 0, label = "Antoine Griezmann"), size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Ángel Correa",26 ], y = 0, label = "Ángel Correa"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Memphis Depay",26 ], y = 0, label = "Memphis Depay"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Álvaro Morata",26 ], y = 0, label = "Álvaro Morata"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+   labs(title="Curva de densidad de Pases Clave por 90 Minutos")
+```
+```{r, echo=FALSE}
+delantero %>%
+   filter(goals > 0 & time > 500) %>%
+   ggplot(aes(x = xGChain90)) + 
+   geom_density(fill="deepskyblue2", alpha=0.6) +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Memphis Depay",29 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Antoine Griezmann",29 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Álvaro Morata",29 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Ángel Correa",29 ], color="red"), 
+              linetype="dashed") + 
+    geom_vline(aes(xintercept = mean(xGChain90), color="red")) +
+    geom_text(mapping=aes(x=mean(xGChain90), y = 0, label = "Media Delanteros"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) +
+   geom_text(mapping=aes(x=delantero[delantero$player_name == "Antoine Griezmann",29 ], y = 0, label = "Antoine Griezmann"), size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Ángel Correa",29 ], y = 0, label = "Ángel Correa"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Memphis Depay",29 ], y = 0, label = "Memphis Depay"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Álvaro Morata",29 ], y = 0, label = "Álvaro Morata"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+   labs(title = "xGChain90", subtitle="Curva de densidad de xG por cada posesión en la que el jugador participa")
+```
+
+```{r, echo=FALSE}
+delantero %>%
+   filter(goals > 0 & time > 500) %>%
+   ggplot(aes(x = xGBuildup90)) + 
+   geom_density(fill="deepskyblue2", alpha=0.6) +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Memphis Depay",30 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Antoine Griezmann",30 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Álvaro Morata",30 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = delantero[delantero$player_name == "Ángel Correa",30 ], color="red"), 
+              linetype="dashed") + 
+    geom_vline(aes(xintercept = mean(xGBuildup90), color="red")) +
+    geom_text(mapping=aes(x=mean(xGBuildup90), y = 0, label = "Media Delanteros"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) +
+   geom_text(mapping=aes(x=delantero[delantero$player_name == "Antoine Griezmann",30 ], y = 0, label = "Antoine Griezmann"), size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Ángel Correa",30 ], y = 0, label = "Ángel Correa"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Memphis Depay",30 ], y = 0, label = "Memphis Depay"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=delantero[delantero$player_name == "Álvaro Morata",30 ], y = 0, label = "Álvaro Morata"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+   labs(title = "xGBuildup90", subtitle="Curva de densidad de xG por cada posesión en la que el jugador participa, sin contar Pases Clave y Tiros")
+```
+Se va a realizar un filtro con los valores mínimos que se ha interpretado como necesarios de las gráficas anteriores, y se mostrará el nombre de los jugadores adecuados.
+
+```{r}
+delantero[, c(2,4,21:26, 29:33)] %>%
+   filter(goals90 > 0.45 & time > 500 & assists90 > 0.15 & goals_x_shots > 0.15 & key_passes90 > 1.4 & xGBuildup90 > 0.2 & goals_xG_x_shot > 0.08)
+```
+Se ha obtenido una lista de 9 jugadores para una posible sustitución de los 4 que tiene el equipo. El coste del fichaje de estos 10 jugadores varía mucho y dependería de la situación económica del club en ese momento.
+
+### CENTROCAMPISTAS
+LO primero que se hará será crear el dataframe correspondiente a los mediocentros y eliminar los que no hayan jugado el tiempo suficiente para que sus datos sean representativos.
+```{r}
+mc <- rbind(df1[df1$position1 == "M",])
+mc <- mc %>% filter(!is.na(mc$player_name)) %>%  filter(time > 350)
+mc <- distinct(mc) %>%
+  cbind(goals_xG_x_shot = mc$goals90 * mc$xG90 / mc$shots90) %>%
+  cbind(goals_xG = mc$goals90 - mc$xG90)
+```
+
+Veamos cuántos centrocampistas están por encima de la media en las características típicas de su posición.
+```{r}
+mc %>%
+   filter( xA90 > mean(xA90) & key_passes90 > mean(key_passes90) & xGBuildup90 > mean(xGBuildup90)) %>%
+dim()
+```
+Hay 85 jugadores que cumplen con los filtros realizados. Son demasiados, por lo que se realizarán gráficos similares a los utilizados en la posición de delantero para filtrar más exhaustivamente los datos.
+
+```{r}
+mc %>%
+   filter(goals > 0 & time > 500) %>%
+   ggplot(aes(x = xA90)) + 
+   geom_density(fill="deepskyblue2", alpha=0.6) +
+   geom_vline(aes(xintercept = mc[mc$player_name == "Rodrigo de Paul",24 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = mc[mc$player_name == "Thomas Lemar",24 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = mc[mc$player_name == "Geoffrey Kondogbia",24 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = mc[mc$player_name == "Koke",24 ], color="red"), 
+              linetype="dashed") + 
+   geom_vline(aes(xintercept = mc[mc$player_name == "Pablo Barrios Rivas",24 ], color="red"), 
+              linetype="dashed") + 
+    geom_vline(aes(xintercept = mean(xA90), color="red")) +
+    geom_text(mapping=aes(x=mean(xA90), y = 0, label = "Media Centrocampistas"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) +
+   geom_text(mapping=aes(x=mc[mc$player_name == "Rodrigo de Paul",24 ], y = 0, label = "Rodrigo de Paul"), size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=mc[mc$player_name == "Thomas Lemar",24 ], y = 0, label = "Thomas Lemar"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=mc[mc$player_name == "Geoffrey Kondogbia",24 ], y = 0, label = "Geoffrey Kondogbia"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=mc[mc$player_name == "Koke",24 ], y = 0, label = "Koke"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=mc[mc$player_name == "Pablo Barrios Rivas",24 ], y = 0, label = "Pablo Barrios Rivas"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+   labs(title = "xA90", subtitle="Curva de densidad de asistencias esperadas")
+```
+
+```{r, echo=FALSE}
+mc %>%
+   filter(goals > 0 & time > 500) %>%
+   ggplot(aes(x = key_passes90)) + 
+   geom_density(fill="deepskyblue2", alpha=0.6) +
+   geom_vline(aes(xintercept = mc[mc$player_name == "Rodrigo de Paul",26 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = mc[mc$player_name == "Thomas Lemar",26 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = mc[mc$player_name == "Geoffrey Kondogbia",26 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = mc[mc$player_name == "Koke",26 ], color="red"), 
+              linetype="dashed") + 
+   geom_vline(aes(xintercept = mc[mc$player_name == "Pablo Barrios Rivas",26 ], color="red"), 
+              linetype="dashed") + 
+    geom_vline(aes(xintercept = mean(key_passes90), color="red")) +
+    geom_text(mapping=aes(x=mean(key_passes90), y = 0, label = "Media Centrocampistas"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) +
+   geom_text(mapping=aes(x=mc[mc$player_name == "Rodrigo de Paul",26 ], y = 0, label = "Rodrigo de Paul"), size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=mc[mc$player_name == "Thomas Lemar",26 ], y = 0, label = "Thomas Lemar"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=mc[mc$player_name == "Geoffrey Kondogbia",26 ], y = 0, label = "Geoffrey Kondogbia"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=mc[mc$player_name == "Koke",26 ], y = 0, label = "Koke"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=mc[mc$player_name == "Pablo Barrios Rivas",26 ], y = 0, label = "Pablo Barrios Rivas"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+   labs(title = "key_passes90", subtitle="Curva de densidad de pases clave")
+```
+```{r, echo=FALSE}
+mc %>%
+   filter(goals > 0 & time > 500) %>%
+   ggplot(aes(x = xGBuildup90)) + 
+   geom_density(fill="deepskyblue2", alpha=0.6) +
+   geom_vline(aes(xintercept = mc[mc$player_name == "Rodrigo de Paul",30 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = mc[mc$player_name == "Thomas Lemar",30 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = mc[mc$player_name == "Geoffrey Kondogbia",30 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = mc[mc$player_name == "Koke",30 ], color="red"), 
+              linetype="dashed") + 
+   geom_vline(aes(xintercept = mc[mc$player_name == "Pablo Barrios Rivas",30 ], color="red"), 
+              linetype="dashed") + 
+    geom_vline(aes(xintercept = mean(xGBuildup90), color="red")) +
+    geom_text(mapping=aes(x=mean(xGBuildup90), y = 0, label = "Media Centrocampistas"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) +
+   geom_text(mapping=aes(x=mc[mc$player_name == "Rodrigo de Paul",30 ], y = 0, label = "Rodrigo de Paul"), size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=mc[mc$player_name == "Thomas Lemar",30 ], y = 0, label = "Thomas Lemar"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=mc[mc$player_name == "Geoffrey Kondogbia",30 ], y = 0, label = "Geoffrey Kondogbia"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=mc[mc$player_name == "Koke",30 ], y = 0, label = "Koke"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=mc[mc$player_name == "Pablo Barrios Rivas",30 ], y = 0, label = "Pablo Barrios Rivas"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+   labs(title = "xGBuildup90", subtitle="Curva de densidad de ocasiones creadas sin contar pases clave")
+```
+
+Las tres variables representadas son las más importantes para esta posición y son las que se tendrán en cuenta, pero como para determinar quién gana un partido se cuentan los goles, también se hará un último gráfico de diferencia entre goles y goles esperados.
+
+```{r, echo=FALSE}
+mc %>%
+   filter(goals > 0 & time > 500) %>%
+   ggplot(aes(x = goals_xG)) + 
+   geom_density(fill="deepskyblue2", alpha=0.6) +
+   geom_vline(aes(xintercept = mc[mc$player_name == "Rodrigo de Paul",32 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = mc[mc$player_name == "Thomas Lemar",32 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = mc[mc$player_name == "Geoffrey Kondogbia",32 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = mc[mc$player_name == "Koke",32 ], color="red"), 
+              linetype="dashed") + 
+   geom_vline(aes(xintercept = mc[mc$player_name == "Pablo Barrios Rivas",32 ], color="red"), 
+              linetype="dashed") + 
+    geom_vline(aes(xintercept = mean(goals_xG), color="red")) +
+    geom_text(mapping=aes(x=mean(goals_xG), y = 0, label = "Media Centrocampistas"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) +
+   geom_text(mapping=aes(x=mc[mc$player_name == "Rodrigo de Paul",32 ], y = 0, label = "Rodrigo de Paul"), size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=mc[mc$player_name == "Thomas Lemar",32 ], y = 0, label = "Thomas Lemar"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=mc[mc$player_name == "Geoffrey Kondogbia",32 ], y = 0, label = "Geoffrey Kondogbia"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=mc[mc$player_name == "Koke",32 ], y = 0, label = "Koke"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=mc[mc$player_name == "Pablo Barrios Rivas",32 ], y = 0, label = "Pablo Barrios Rivas"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+   labs(title = "goals_xG", subtitle="Curva de densidad de la diferencia entre goles marcados y esperados")
+```
+Con toda la información de elos gráficos, ya podemos filtrar de forma más precisa para encontrar jugadores con al menos las mismas características que los 5 representados.
+
+```{r}
+mc[, c(2,4,21:26, 29:32)] %>%
+  filter( assists90 > 0.15 & goals_xG >= -0.5 & key_passes90 > 1.75 & xGBuildup90 > 0.45)
+```
+Se han obtenido 11 jugadores que igualan o mejoran las estadísticas de los 5 jugadores del Atlético de Madrid.
+
+En este curso se ha recomendado utilizar la mentalidad analítica para el proceso. Los filtros creados para obtener esta pequeña lista de jugadores se basan en la correcta interpretación de los gráficos realizados, no es la intuición sin base analítica.
+
+
+### DEFENSAS
+Este es el grupo de posiciones en el que menos valiosos son los datos que se tienen. Aún así, el análisis se realizará buscando defensas con vocación ofensivos debido a la naturaleza de los datos.
+ 
+```{r} 
+defend <- rbind(df1[df1$position1 == "D",])
+defend <- defend %>% filter(!is.na(defend$player_name)) %>%  filter(time > 350)
+defend <- distinct(defend) %>%
+  cbind(goals_xG_x_shot = defend$goals90 * defend$xG90 / defend$shots90) %>%
+  cbind(goals_xG = defend$goals90 - defend$xG90)
+
+defend %>%
+   filter( xA90 > mean(xA90) & key_passes90 > mean(key_passes90) & xGBuildup90 > mean(xGBuildup90)) %>%
+  dim()
+```
+
+Hay 151 jugadores que cumplen con los filtros realizados. Son demasiados, por lo que se realizarán gráficos similares a los utilizados en la posición de delantero para filtrar más exhaustivamente los datos.
+
+```{r, echo = FALSE}
+defend %>%
+   filter(goals > 0 & time > 500) %>%
+   ggplot(aes(x = xA90)) + 
+   geom_density(fill="deepskyblue2", alpha=0.6) +
+   geom_vline(aes(xintercept = defend[defend$player_name == "Yannick Carrasco",24 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = defend[defend$player_name == "Nahuel Molina",24 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = defend[defend$player_name == "Mario Hermoso",24 ], color="red"), 
+              linetype="dashed") + 
+   geom_vline(aes(xintercept = defend[defend$player_name == "Giménez",24 ], color="red"), 
+              linetype="dashed") + 
+    geom_vline(aes(xintercept = mean(xA90), color="red")) +
+    geom_text(mapping=aes(x=mean(xA90), y = 0, label = "Media Defensas"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) +
+   geom_text(mapping=aes(x=defend[defend$player_name == "Yannick Carrasco",24 ], y = 0, label = "Yannick Carrasco"), size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=defend[defend$player_name == "Nahuel Molina",24 ], y = 0, label = "Nahuel Molina"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=defend[defend$player_name == "Mario Hermoso",24 ], y = 0, label = "Mario Hermoso"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=defend[defend$player_name == "Giménez",24 ], y = 0, label = "Giménez"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+   labs(title = "xA90", subtitle="Curva de densidad de asistencias esperadas")
+```
+
+```{r, echo = FALSE}
+defend %>%
+   filter(goals > 0 & time > 500) %>%
+   ggplot(aes(x = key_passes90)) + 
+   geom_density(fill="deepskyblue2", alpha=0.6) +
+   geom_vline(aes(xintercept = defend[defend$player_name == "Yannick Carrasco",26 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = defend[defend$player_name == "Nahuel Molina",26 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = defend[defend$player_name == "Mario Hermoso",26 ], color="red"), 
+              linetype="dashed") + 
+   geom_vline(aes(xintercept = defend[defend$player_name == "Giménez",26 ], color="red"), 
+              linetype="dashed") + 
+    geom_vline(aes(xintercept = mean(key_passes90), color="red")) +
+    geom_text(mapping=aes(x=mean(key_passes90), y = 0, label = "Media Defensas"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) +
+   geom_text(mapping=aes(x=defend[defend$player_name == "Yannick Carrasco",26 ], y = 0, label = "Yannick Carrasco"), size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=defend[defend$player_name == "Nahuel Molina",26 ], y = 0, label = "Nahuel Molina"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=defend[defend$player_name == "Mario Hermoso",26 ], y = 0, label = "Mario Hermoso"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=defend[defend$player_name == "Giménez",26 ], y = 0, label = "Giménez"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+   labs(title = "key_passes90", subtitle="Curva de densidad de pases clave por 90 minutos")
+```
+
+```{r, echo = FALSE}
+defend %>%
+   filter(goals > 0 & time > 500) %>%
+   ggplot(aes(x = xGBuildup90)) + 
+   geom_density(fill="deepskyblue2", alpha=0.6) +
+   geom_vline(aes(xintercept = defend[defend$player_name == "Yannick Carrasco",30 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = defend[defend$player_name == "Nahuel Molina",30 ], color="red"), linetype="dashed") +
+   geom_vline(aes(xintercept = defend[defend$player_name == "Mario Hermoso",30 ], color="red"), 
+              linetype="dashed") + 
+   geom_vline(aes(xintercept = defend[defend$player_name == "Giménez",30], color="red"), 
+              linetype="dashed") + 
+    geom_vline(aes(xintercept = mean(xGBuildup90), color="red")) +
+    geom_text(mapping=aes(x=mean(xGBuildup90), y = 0, label = "Media Defensas"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) +
+   geom_text(mapping=aes(x=defend[defend$player_name == "Yannick Carrasco",30 ], y = 0, label = "Yannick Carrasco"), size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=defend[defend$player_name == "Nahuel Molina",30 ], y = 0, label = "Nahuel Molina"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=defend[defend$player_name == "Mario Hermoso",30 ], y = 0, label = "Mario Hermoso"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+    geom_text(mapping=aes(x=defend[defend$player_name == "Giménez",30 ], y = 0, label = "Giménez"), 
+             size=2, angle=270, vjust=-0.4, hjust=5) + 
+   labs(title = "xGBuildup9", subtitle="Curva de densidad de ocasiones creadas sin contar pases clave")
+```
+
+```{r}
+defend[, c(2,4,21:26, 29:32)] %>%
+  filter( assists90 > 0.15 & key_passes90 > 1.25 & xGBuildup90 > 0.35)
+```
+
+Hay 14 jugadores posibles para sustituir las bajas de los actuales que cumplen con las métricas mínimas para al menos igualar lo que realizan estos jugadores actuales.
+
+
+### PORTEROS
+Para este análisis, debido a la falta de datos, se realizará de forma distinta. Se va a utilizar el data frame de tiros realizados, donde se buscarán mediante el procesamiento de datos los equipos con mayor diferencia positiva entre los goles esperados y los recibidos. Es decir, se buscarán los equipos donde su/sus porteros hayan encajado menos goles de los esperados. Cuando se obtegan los datos, se hará un trabajo de investigación para comprobar si todos los partidos los ha jugado el mismo portero o no.
+
+```{r}
+shots_dataset %>%
+  ggplot(aes(result)) +
+  geom_bar() + 
+  labs(title="Resultado del tiro")
+```
+Se van a eliminar MissedShots, OwnGoal y ShotOnPost. En estos tiros no interviene el portero ni acaban en gol por lo que no interesan para el análisis. Además, para un análisis posterior se creará una variable nueva llamada "goal_no" que tendrá dos posibles respuestas: Sí y No. A "No" pertenecerán BlockedShot y SavedShot. La diferencia entre estas dos es que un tiro bloqueado el portero consigue quedarse con el balón y en un tiro salvado (parada) no lo consigue.
+
+```{r}
+shots_dataset <- rbind(shots_dataset[shots_dataset$result == "BlockedShot", ], shots_dataset[shots_dataset$result == "Goal", ], shots_dataset[shots_dataset$result == "SavedShot", ]) 
+
+shots_dataset %>%
+  ggplot(aes(result)) +
+  geom_bar() + 
+  labs(title="Resultado del tiro")
+```
+
+```{r, echo==FALSE, warning = FALSE}
+# Mediante filtros se crea un dataframe con la suma de xG de los tiros RECIBIDOS jugando de LOCAL y por resultado
+shots_home <- shots_dataset[, c("result", "xG", "h_a", "h_team", "a_team")] %>%
+  filter(h_a == "a") %>%
+  group_by(h_team, h_a, result) %>%
+  summarise(xG_accumulate = sum(xG))
+# Mediante filtros se crea un dataframe con la suma de xG de los tiros RECIBIDOS jugando de VISITANTE y por resultado
+shots_away <- shots_dataset[, c("result", "xG", "h_a", "h_team", "a_team")] %>%
+  filter(h_a == "h") %>%
+  group_by(a_team, h_a, result) %>%
+  summarise(xG_accumulate = sum(xG))
+```
+
+```{r}
+#Ejemplo de las 3 filas por equipo que se obtienen
+shots_home[1:3,]
+```
+```{r}
+# Se incorporan los dos dataframe creados y se agrupan de nuevo por equipo y resultado obteniendo la suma de los goles esperados recibidos.
+colnames(shots_home) <- c("team", "h_a","result", "xG_accumulate")
+colnames(shots_away) <- c("team", "h_a","result", "xG_accumulate")
+shots_dif <- rbind(shots_home, shots_away)
+```
+```{r}
+shots_dif[ , c("team", "result", "xG_accumulate")] %>%
+  group_by(team, result) %>%
+  summarise(xG_accumulate = sum(xG_accumulate))
+
+#Modificaré el DF para obtener una fila por equipo
+blocked <- shots_dif %>%
+  filter(result == "BlockedShot") %>%
+  mutate(Blocked_shot = xG_accumulate) 
+goal <- shots_dif %>%
+  filter(result == "Goal") %>%
+  mutate(goal = xG_accumulate)
+saved <- shots_dif %>%
+  filter(result == "SavedShot") %>%
+  mutate(saved = xG_accumulate)
+
+shots_dif <- rbind(blocked, goal, saved)
+shots_dif <- shots_dif[order(shots_dif$team), ]
+shots_dif <- shots_dif[ , c("team", "result", "Blocked_shot", "goal", "saved")] %>%
+  group_by(team, result) %>%
+  summarise(Blocked_shot = sum(Blocked_shot), goal = sum(goal), saved = sum(saved))
+
+team_1 <- unique(shots_dif$team)
+
+shots_dif <- shots_dif[ , c("team", "Blocked_shot", "goal", "saved")] %>%
+  group_by(team = (row_number() - 1) %/% 3) %>%
+  summarize(
+    Blocked_shot = paste(na.omit(Blocked_shot), collapse = " "),
+    goal = paste(na.omit(goal), collapse = " "),
+    saved = paste(na.omit(saved), collapse = " ")
+  ) %>%
+  ungroup() %>%
+  cbind(team_1 = team_1)
+
+shots_dif <- shots_dif[, 2:5]
+```
+
+Ahora se crearán variables a partir del Data Frame limpio. Estas variables son:
+* Porcentaje de blocadas por parada
+* Diferencia entre paradas y goles esperados
+* Paradas/gol
+
+```{r}
+shots_dif$Blocked_shot <- as.numeric(shots_dif$Blocked_shot)
+shots_dif$goal <- as.numeric(shots_dif$goal)
+shots_dif$saved <- as.numeric(shots_dif$saved)
+shots_dif$porc_block = shots_dif$Blocked_shot/(shots_dif$Blocked_shot+shots_dif$saved)*100
+shots_dif$dif_paradas = shots_dif$Blocked_shot+shots_dif$saved-shots_dif$goal
+shots_dif$paradas_goal = (shots_dif$Blocked_shot+shots_dif$saved)/shots_dif$goal
+```
+
+Ahora se buscan los valores del Atlético de Madrid y se filtrará para buscar equipos con mejores valores.
+```{r}
+shots_dif[shots_dif$team_1 == "Atletico Madrid", ]
+
+shots_dif %>%
+  filter(porc_block > 40 & dif_paradas > 2.5 & paradas_goal > 1.2) %>% dim()
+
+#Con estos filtros se obtienen 20 equipos, si se quiere filtrar más, se podrían aumentar el filtro al cuartil 3 (Q3) de cada variable.
+
+shots_dif %>%
+  filter(porc_block > quantile(porc_block, probs = 0.75) & dif_paradas > quantile(dif_paradas, probs = 0.75) & paradas_goal > quantile(paradas_goal, probs = 0.75))
+```
+Se obtienen 5 equipos con muy buenas métricas. Ahora se comprobará el número de minutos que han tenido los porteros de estos equipos para ver si las métricas se le pueden atribuir a un único portero.
+
+```{r}
+gk <- rbind(df1[df1$position1 == "GK",])
+# Eliminamos los que hayan jugado menos de 350 min puesto que no son representativos
+gk <- gk %>% filter(!is.na(gk$player_name)) %>%  filter(time > 350)
+gk[, c("player_name", "time", "team_title")] %>% filter (team_title == "Wolverhampton Wanderers" | team_title == "Verona" | team_title ==  "Manchester United" | team_title == "Empoli" | team_title == "Brentford")
+```
+Podemos observar que los dos porteros del Empoli sí se han repartido los minutos de juego, por lo que las métricas en este caso no son fiables. Sin embargo, en el caso De Gea (M. United), Raya (Brentford), VJosé Sá (Wolves) y Montipò (Verona) serían jugadores muy interesantes si hiciesen falta.
